@@ -5,131 +5,149 @@
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.8+-green.svg)](https://opencv.org)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)](https://streamlit.io)
 
-A **real-time hand gesture and American Sign Language (ASL) recognition system** using MediaPipe's 21-point hand landmark tracking and geometric deep learning, running at **30fps on CPU** with no cloud dependency.
+# 🤟 SignLang AI: Real-Time Hand Gesture Recognition
+
+A real-time hand gesture recognition system built using **MediaPipe, PyTorch, OpenCV, and Streamlit**. The application detects hand landmarks from webcam input, extracts meaningful features, and predicts gestures using a custom-trained neural network.
 
 ---
 
-## 🎯 Project Highlights
+## 🚀 Features
 
-| Feature | Detail |
-|---|---|
-| **Hand Tracking** | MediaPipe Hands — 21 3D landmarks per hand |
-| **Speed** | 30fps real-time on CPU (no GPU needed) |
-| **Gestures** | 26 ASL letters + 8 common gestures |
-| **Input** | Webcam live feed + image upload + video upload |
-| **Explainability** | Landmark skeleton overlay, confidence scores |
-| **Sentence Builder** | Spell words by holding ASL signs |
+* Real-time gesture recognition using webcam input
+* Hand landmark detection using MediaPipe
+* Custom GestureNet (MLP) classifier built with PyTorch
+* Interactive Streamlit web application
+* Supports image-based and live inference
+* Runs efficiently on CPU without requiring cloud services
+
+---
+
+## 🧠 Project Overview
+
+Traditional image-based gesture recognition models require large datasets and computationally expensive CNNs. This project leverages **MediaPipe's 21-point hand landmark detector** to extract compact geometric representations of hand poses.
+
+The extracted landmark coordinates are normalized and used to train a lightweight neural network capable of recognizing gestures in real time.
 
 ---
 
 ## 🏗️ Architecture
 
-```
-Camera Frame / Uploaded Image
-         ↓
-MediaPipe BlazePalm (hand detection)
-         ↓
-21 Landmark Extraction (x, y, z per joint)
-         ↓
-Feature Engineering:
-  ├── Finger extension states (5 binary values)
-  ├── Joint angles (thumb, index curl etc.)
-  └── Fingertip distances
-         ↓
-Rule-based + GestureNet MLP Classifier
-         ↓
-Label + Confidence + Landmark Overlay
-```
+Webcam/Image
+↓
+MediaPipe Hand Detector
+↓
+21 Hand Landmarks (63 Features)
+↓
+Feature Normalization
+↓
+GestureNet (MLP Classifier)
+↓
+Gesture Prediction
+↓
+Streamlit User Interface
 
 ---
 
-## 🚀 Quick Start
+## 📊 Dataset
+
+* Custom dataset collected using webcam
+* Total Samples: **1007**
+* Number of Gesture Classes: **14**
+* Data stored as landmark coordinates for efficient training
+
+---
+
+## 📈 Model Performance
+
+| Metric              | Value                             |
+| ------------------- | --------------------------------- |
+| Validation Accuracy | **98%**                           |
+| Inference Mode      | Real-time                         |
+| Runtime             | CPU                               |
+| Input Features      | 63 (21 landmarks × 3 coordinates) |
+
+---
+
+## 🛠️ Tech Stack
+
+* Python
+* PyTorch
+* MediaPipe
+* OpenCV
+* Streamlit
+* NumPy
+
+---
+
+## 📂 Project Structure
+
+SignLang-AI/
+├── app.py
+├── collect_data.py
+├── train.py
+├── train_gesture_model.py
+├── colab_train.py
+├── gesture_model.pth
+├── gesture_data.json
+├── hand_landmarker.task
+├── requirements.txt
+├── README.md
+└── setup_and_run.bat
+
+---
+
+## ▶️ Installation
 
 ```bash
-# 1. Clone
-git clone https://github.com/yourusername/signlang-ai.git
-cd signlang-ai
-
-# 2. Install
+git clone https://github.com/ashish-4169/SignLang-AI.git
+cd SignLang-AI
 pip install -r requirements.txt
+```
 
-# 3. Run
+## ▶️ Run the Application
+
+```bash
 streamlit run app.py
 ```
 
 ---
 
-## 🧠 Train Your Own Model
+## 🧪 Training the Model
+
+Collect gesture samples:
 
 ```bash
-# Step 1: Collect landmark data via webcam
-python train_gesture_model.py --collect
+python collect_data.py
+```
 
-# Step 2: Train the neural network
-python train_gesture_model.py --train
+Train the classifier:
 
-# Step 3: Evaluate
-python train_gesture_model.py --eval
+```bash
+python train.py
 ```
 
 ---
 
-## 📁 Project Structure
+## 💼 Resume Highlights
 
-```
-signlang-ai/
-├── app.py                      # Streamlit app (webcam + upload)
-├── train_gesture_model.py      # MLP training on landmark data
-├── requirements.txt
-├── models/
-│   └── gesture_model.pth       # Trained weights
-├── data/
-│   └── gestures.json           # Collected landmark dataset
-├── static/
-│   └── training_curves.png
-└── README.md
-```
-
----
-
-## 📊 Performance
-
-| Metric | Value |
-|---|---|
-| Common Gestures Accuracy | ~92% |
-| ASL Letter Accuracy | ~85% |
-| Inference Speed | 30fps (CPU) |
-| Latency | <15ms per frame |
-
----
-
-## 🖐️ Supported Signs
-
-**Common Gestures:** 👋 Hello · 👍 Thumbs Up · ✌️ Peace · 🤟 ILY · 🤘 Rock On · 🤙 Call Me · 👊 Fist · ☝️ Pointing
-
-**ASL Letters:** A B C D E F G H I K L M N · and more
-
----
-
-## 📝 Resume Line
-
-```
-SignLang AI | OpenCV · MediaPipe · PyTorch · Streamlit
-• Built real-time ASL recognition at 30fps using MediaPipe's 21-point hand tracking
-• Engineered geometric features from joint angles and fingertip distances 
-  achieving 92% accuracy on common gestures
-• Developed interactive web app with webcam feed, video analysis, and 
-  a sentence-building interface for assistive communication
-• Trained lightweight GestureNet MLP on self-collected landmark dataset; 
-  entire pipeline runs offline on CPU with <15ms latency
-```
+* Collected and curated a custom dataset of **1,007 hand gesture samples across 14 gesture classes**.
+* Designed and trained a **GestureNet Multi-Layer Perceptron (MLP)** using normalized 3D hand landmark features extracted from MediaPipe.
+* Achieved **98% validation accuracy** on unseen gesture samples.
+* Developed and deployed a **real-time Streamlit application** enabling live gesture recognition through webcam input.
 
 ---
 
 ## ⚠️ Disclaimer
 
-Academic project. Not a certified accessibility device.
+This project was developed for educational and research purposes and is not intended to be used as a certified assistive communication device.
 
 ---
 
-**Author:** Your Name | B.Tech [Branch] | [College]
+## 👨‍💻 Author
+
+**Ashish Kumar**
+B.Tech, Electrical Engineering
+National Institute of Technology Agartala
+
+
+
