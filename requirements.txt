@@ -1,7 +1,18 @@
-streamlit==1.32.0
-opencv-python-headless==4.9.0.80
-mediapipe==0.10.9
+# App
+streamlit>=1.50
+streamlit-webrtc>=0.60
+av
+opencv-python-headless>=4.9
+mediapipe>=0.10.9
 numpy
 Pillow
+pandas
 torch
-torchvision
+
+# Text-to-speech (gTTS = online voice, pyttsx3 = offline OS voice)
+gTTS
+pyttsx3
+
+# Training
+scikit-learn
+matplotlib
