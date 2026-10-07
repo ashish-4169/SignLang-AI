@@ -46,7 +46,10 @@ def _script():
     stub.WebRtcMode = types.SimpleNamespace(SENDRECV="sendrecv")
     sys.modules["streamlit_webrtc"] = stub
 
-    exec(compile(open("app.py").read(), "app.py", "exec"), {"__name__": "__main__"})
+    # Explicit UTF-8: app.py contains emoji/symbols, and Windows defaults to cp1252.
+    with open("app.py", encoding="utf-8") as f:
+        source = f.read()
+    exec(compile(source, "app.py", "exec"), {"__name__": "__main__"})
 
 
 def _run_app(monkeypatch, *, auto_speak, click_speak_times=0):
