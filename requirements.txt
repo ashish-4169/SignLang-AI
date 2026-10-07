@@ -1,6 +1,6 @@
 # App
 streamlit>=1.50
-streamlit-webrtc>=0.60
+streamlit-webrtc>=0.78.1
 av
 opencv-python-headless>=4.9
 mediapipe>=0.10.9
