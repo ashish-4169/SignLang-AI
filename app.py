@@ -283,14 +283,25 @@ cam_col, side_col = st.columns([3, 2], gap="large")
 with cam_col:
     cam_off_ph = st.empty()
     ctx = webrtc_streamer(
-        key="signlang-live",
-        mode=WebRtcMode.SENDRECV,
-        video_frame_callback=engine,
-        media_stream_constraints={"video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
-                                  "audio": False},
-        async_processing=True,
-        translations={"start": "Start camera", "stop": "Stop camera", "select_device": "Switch camera"},
-    )
+    key="signlang-live",
+    mode=WebRtcMode.SENDRECV,
+    video_frame_callback=engine,
+    media_stream_constraints={
+        "video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
+        "audio": False,
+    },
+    rtc_configuration={
+        "iceServers": [
+            {"urls": ["stun:stun.l.google.com:19302"]}
+        ]
+    },
+    async_processing=True,
+    translations={
+        "start": "Start camera",
+        "stop": "Stop camera",
+        "select_device": "Switch camera",
+    },
+)
     if not ctx.state.playing:
         cam_off_ph.markdown('<div class="camera-off"><strong>Camera is off</strong>'
                             'Press Start camera below and allow access.</div>', unsafe_allow_html=True)
