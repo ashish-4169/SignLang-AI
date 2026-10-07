@@ -26,51 +26,72 @@ from signlang.model import GestureClassifier
 from signlang.sentence import PredictionSmoother, SentenceBuilder
 from signlang.tts import TTSError, synthesize
 
-st.set_page_config(page_title="SignLang AI", page_icon="🤟", layout="wide")
+st.set_page_config(page_title="SignLang AI", page_icon="🤟", layout="wide",
+                   initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-html, body, .stApp { font-family: 'Inter', sans-serif; }
-#MainMenu, footer { visibility: hidden; }
-.block-container { padding-top: 1.2rem; max-width: 1280px; }
+:root {
+  --paper: #F5F6F8; --surface: #FFFFFF; --ink: #16181D; --muted: #676C7A;
+  --line: #DDE0E6; --accent: #3F44C8; --hold: #D9822B;
+}
+#MainMenu, footer, [data-testid="stSidebarCollapsedControl"] { display: none; }
+.block-container { padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1180px; }
 
-.navbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.2rem; }
-.nav-logo { font-size:1.45rem; font-weight:800; color:#1a1f36; letter-spacing:-0.5px; }
-.nav-logo span { color:#5b5bd6; }
-.nav-badge { background:linear-gradient(135deg,#5b5bd6,#7c6af7); color:#fff; border-radius:20px;
-             padding:0.3rem 1rem; font-size:0.72rem; font-weight:600; letter-spacing:0.5px; }
+/* header */
+.brand { margin: 0; font-size: 1.9rem; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; line-height: 1.1; }
+.tagline { margin: 0.25rem 0 0; color: var(--muted); font-size: 1rem; }
 
-.stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1.2rem; }
-@media (max-width: 800px) { .stats-row { grid-template-columns:repeat(2,1fr); } }
-.stat-card { background:#fff; border-radius:14px; padding:1rem 1.2rem; display:flex; align-items:center;
-             gap:0.9rem; box-shadow:0 1px 3px rgba(0,0,0,0.06); border:1px solid #eef0f6; }
-.stat-icon { width:42px; height:42px; border-radius:12px; display:flex; align-items:center;
-             justify-content:center; font-size:1.15rem; flex-shrink:0; }
-.i-purple{background:#ede9fe} .i-green{background:#dcfce7} .i-orange{background:#ffedd5} .i-blue{background:#dbeafe}
-.stat-val { font-size:1.4rem; font-weight:800; color:#1a1f36; line-height:1; }
-.stat-lbl { font-size:0.66rem; font-weight:600; color:#9ca3af; text-transform:uppercase; letter-spacing:1px; margin-top:0.25rem; }
+/* prediction: plain text, no card */
+.pred { padding: 0.2rem 0 1.4rem; }
+.pred-label { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.15rem; }
+.pred-sign { font-size: 2.6rem; font-weight: 700; color: var(--ink); line-height: 1.05; letter-spacing: -0.02em; }
+.pred-sign.idle { color: #B9BDC7; }
+.pred-row { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.55rem; }
+.pred-pct { font-weight: 700; color: var(--ink); min-width: 3.2rem; font-variant-numeric: tabular-nums; }
+.bar { flex: 1; height: 6px; background: #E8EAEE; border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.bar.hold > i { background: var(--hold); }
+.pred-hint { color: var(--muted); font-size: 0.88rem; margin-top: 0.5rem; }
 
-.panel { background:#fff; border:1px solid #eef0f6; border-radius:16px; padding:1.1rem 1.3rem;
-         box-shadow:0 1px 3px rgba(0,0,0,0.06); margin-bottom:0.9rem; }
-.k { font-size:0.66rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#9ca3af;
-     display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem; }
-.gesture-text { font-size:2.8rem; font-weight:800; color:#1a1f36; line-height:1.1; letter-spacing:-1px; }
-.gesture-empty { color:#d1d5db; }
-.sub { font-size:0.78rem; color:#9ca3af; font-weight:500; margin:0.15rem 0 0.8rem; }
-.pct { font-size:0.9rem; font-weight:700; color:#16a34a; letter-spacing:0; }
-.track { background:#f0f2f8; border-radius:6px; height:8px; overflow:hidden; margin-bottom:0.8rem; }
-.fill { height:100%; border-radius:6px; background:linear-gradient(90deg,#5b5bd6,#22c55e); }
-.fill-hold { height:100%; border-radius:6px; background:#f59e0b; }
-.sent-box { background:#f8f9fc; border:1px solid #e8eaf2; border-radius:10px; padding:0.9rem 1rem;
-            font-size:1.35rem; font-weight:700; color:#1a1f36; min-height:3.4rem; word-break:break-word;
-            white-space:pre-wrap; }
-.sent-placeholder { color:#c4c9d4; font-size:0.9rem; font-weight:400; }
-.cursor { display:inline-block; width:2px; height:1.2em; background:#5b5bd6; vertical-align:text-bottom;
-          animation:blink 1s step-end infinite; margin-left:1px; }
-@keyframes blink { 50% { opacity:0; } }
-.chip { display:inline-block; background:#f5f3ff; border:1px solid #ddd6fe; color:#5b5bd6; border-radius:8px;
-        padding:0.15rem 0.5rem; font-size:0.72rem; font-weight:600; margin:0 0.3rem 0.35rem 0; }
+/* sentence: the one bordered surface, the boldest type */
+.sentence { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+            padding: 1rem 1.15rem; min-height: 6.2rem; font-size: 1.7rem; line-height: 1.35;
+            font-weight: 700; color: var(--ink); white-space: pre-wrap; word-break: break-word;
+            margin-bottom: 0.9rem; }
+.sentence .empty { color: #A4A9B4; font-weight: 400; font-size: 1.05rem; }
+.cursor { display: inline-block; width: 2px; height: 1.15em; background: var(--accent);
+          vertical-align: text-bottom; margin-left: 2px; animation: blink 1.1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+/* comfortable buttons */
+.stButton button { min-height: 2.9rem; font-weight: 700; }
+.stButton button:focus-visible, .stDownloadButton button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* camera is the focus */
+.camera-off { aspect-ratio: 4 / 3; background: #E9EBEF; border-radius: 14px; display: flex;
+              flex-direction: column; align-items: center; justify-content: center; gap: 0.35rem;
+              color: var(--muted); text-align: center; padding: 1rem; }
+.camera-off strong { color: var(--ink); font-size: 1.15rem; }
+.camera-note { color: var(--muted); font-size: 0.92rem; margin-top: 0.6rem; }
+
+/* sign vocabulary list */
+.vocab { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.35rem 1.2rem; }
+.vocab div { padding: 0.35rem 0; border-bottom: 1px solid #ECEEF2; color: var(--ink); }
+.vocab span { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .block-container { padding-top: 1.2rem; }
+  .st-key-header [data-testid="stHorizontalBlock"],
+  .st-key-controls [data-testid="stHorizontalBlock"] { flex-wrap: nowrap; gap: 0.5rem; }
+  .st-key-header [data-testid="stColumn"],
+  .st-key-controls [data-testid="stColumn"] { min-width: 0 !important; width: auto !important; flex: 1 1 0 !important; }
+  .st-key-header [data-testid="stColumn"]:last-child { flex: 0 0 auto !important; }
+  .brand { font-size: 1.6rem; }
+  .pred-sign { font-size: 2.1rem; }
+  .sentence { font-size: 1.35rem; min-height: 4.5rem; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -181,9 +202,12 @@ if "engine" not in st.session_state:
 engine: LiveEngine = st.session_state.engine
 
 
-# ── Sidebar settings ─────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ Settings")
+# ── Header + settings ────────────────────────────────────────────────────────
+head_l, head_r = st.container(key="header").columns([5, 1], vertical_alignment="bottom")
+head_l.markdown('<h1 class="brand">SignLang AI</h1><p class="tagline">Sign → Text → Speech</p>',
+                unsafe_allow_html=True)
+with head_r.popover("Settings", width="stretch"):
+    st.markdown("**Recognition**")
     engine.settings["threshold"] = st.slider(
         "Minimum confidence", 0.30, 0.95, 0.60, 0.05,
         help="Predictions below this are ignored.")
@@ -193,67 +217,48 @@ with st.sidebar:
     engine.builder.hold_seconds = st.slider(
         "Hold time to add a sign (s)", 0.3, 3.0, 1.0, 0.1,
         help="How long a sign must be held steady before it's added to the sentence.")
+    st.markdown("**Camera**")
     engine.settings["mirror"] = st.toggle("Mirror camera (selfie view)", True)
     engine.settings["show_skeleton"] = st.toggle("Draw hand skeleton", True)
-    st.markdown("### 🔊 Speech")
+    st.markdown("**Voice**")
     tts_engine = st.radio("Voice", ["auto", "gtts", "offline"], horizontal=True,
+                          label_visibility="collapsed",
                           format_func={"auto": "Auto", "gtts": "Google", "offline": "Offline"}.get,
                           help="Google (gTTS) needs internet. Offline uses your OS voice via pyttsx3.")
-    auto_speak = st.toggle("Speak each word as it's added", False)
-    st.markdown("### 🧾 Sign → text")
-    st.markdown("".join(
-        f'<span class="chip">{html.escape(k)} → {"␣ space" if v == SPACE else html.escape(v)}</span>'
-        for k, v in GESTURE_TEXT.items() if k in classifier.labels), unsafe_allow_html=True)
-    st.caption("Edit `GESTURE_TEXT` in `signlang/config.py` to change these.")
+    st.caption("Auto uses Google's voice when online and your computer's voice otherwise.")
 
-
-# ── Header + stats ───────────────────────────────────────────────────────────
-st.markdown("""<div class="navbar"><div class="nav-logo">Sign<span>Lang</span> AI</div>
-<div class="nav-badge">🤟 REAL-TIME SIGN → TEXT → SPEECH</div></div>""", unsafe_allow_html=True)
-
-
-def stat(icon, cls, val, lbl):
-    return (f'<div class="stat-card"><div class="stat-icon {cls}">{icon}</div>'
-            f'<div><div class="stat-val">{val}</div><div class="stat-lbl">{lbl}</div></div></div>')
-
-
-acc = f"{metrics['test_accuracy']*100:.0f}%" if metrics else "—"
-left = f"{metrics['test_accuracy_mirrored']*100:.0f}%" if metrics else "—"
-n_samples = sum(metrics["class_counts"].values()) if metrics else "—"
-st.markdown('<div class="stats-row">' +
-            stat("🎯", "i-purple", acc, "Test accuracy") +
-            stat("🫲", "i-green", left, "Left-hand accuracy") +
-            stat("🗂️", "i-orange", f"{n_samples:,}" if metrics else "—", "Training samples") +
-            stat("🤟", "i-blue", len(classifier.labels), "Gestures") +
-            "</div>", unsafe_allow_html=True)
+st.markdown('<div style="height:1.4rem"></div>', unsafe_allow_html=True)
 
 
 # ── Render helpers ───────────────────────────────────────────────────────────
-def gesture_html(snap):
-    if not snap or not snap["label"]:
-        raw = snap and snap["raw"]
-        hint = (f"Seeing <b>{html.escape(raw)}</b> ({snap['raw_conf']:.0%}) — hold steady…" if raw
-                else "Show your hand to the camera")
-        return (f'<div class="panel"><div class="k"><span>Gesture</span></div>'
-                f'<div class="gesture-text gesture-empty">—</div><div class="sub">{hint}</div>'
-                f'<div class="k"><span>Confidence</span><span class="pct">—</span></div>'
-                f'<div class="track"><div class="fill" style="width:0%"></div></div></div>')
+def prediction_html(snap, playing):
+    """Current sign + confidence. Plain text, no model metrics."""
+    if not playing:
+        return ('<div class="pred"><div class="pred-label">Current sign</div>'
+                '<div class="pred-sign idle">—</div>'
+                '<div class="pred-hint">Start the camera to begin.</div></div>')
+    if not snap["label"]:
+        hint = (f"Seeing {html.escape(snap['raw'])}, hold it steady…" if snap["raw"]
+                else "Show your hand to the camera.")
+        return ('<div class="pred"><div class="pred-label">Current sign</div>'
+                f'<div class="pred-sign idle">—</div><div class="pred-hint">{hint}</div></div>')
     pct = int(snap["conf"] * 100)
     hold = int(snap["progress"] * 100)
     token = GESTURE_TEXT.get(snap["label"], snap["label"])
-    adds = "space" if token == SPACE else f"“{html.escape(token)}”"
-    return (f'<div class="panel"><div class="k"><span>Gesture · {html.escape((snap["hand"] or "").upper())} hand</span></div>'
-            f'<div class="gesture-text">{html.escape(snap["label"])}</div>'
-            f'<div class="sub">adds {adds} · {snap["fps"]:.0f} fps</div>'
-            f'<div class="k"><span>Confidence</span><span class="pct">{pct}%</span></div>'
-            f'<div class="track"><div class="fill" style="width:{pct}%"></div></div>'
-            f'<div class="k"><span>Hold to add</span><span class="pct" style="color:#d97706">{hold}%</span></div>'
-            f'<div class="track"><div class="fill-hold" style="width:{hold}%"></div></div></div>')
+    adds = "a space" if token == SPACE else f"“{html.escape(token)}”"
+    return ('<div class="pred"><div class="pred-label">Current sign</div>'
+            f'<div class="pred-sign">{html.escape(snap["label"])}</div>'
+            f'<div class="pred-row"><span class="pred-pct">{pct}%</span>'
+            f'<div class="bar" role="meter" aria-label="Confidence" aria-valuenow="{pct}">'
+            f'<i style="width:{pct}%"></i></div></div>'
+            f'<div class="pred-hint">Hold steady to add {adds}</div>'
+            f'<div class="pred-row"><div class="bar hold" role="meter" aria-label="Hold to add" '
+            f'aria-valuenow="{hold}"><i style="width:{hold}%"></i></div></div></div>')
 
 
 def sentence_html(text):
-    body = html.escape(text) if text else '<span class="sent-placeholder">Hold a sign steady to start typing…</span>'
-    return f'<div class="sent-box">{body}<span class="cursor"></span></div>'
+    body = html.escape(text) if text else '<span class="empty">Your sentence will appear here.</span>'
+    return f'<div class="sentence" aria-live="polite">{body}<span class="cursor"></span></div>'
 
 
 def play(text, ph):
@@ -273,67 +278,61 @@ def play(text, ph):
             f'style="width:100%" src="data:{mime};base64,{b64}"></audio>')
 
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_live, tab_upload, tab_model, tab_about = st.tabs(
-    ["📷  Live", "🖼️  Upload", "📊  Model", "ℹ️  About"])
+# ── Main screen: camera, current sign, sentence ──────────────────────────────
+cam_col, side_col = st.columns([3, 2], gap="large")
+with cam_col:
+    cam_off_ph = st.empty()
+    ctx = webrtc_streamer(
+        key="signlang-live",
+        mode=WebRtcMode.SENDRECV,
+        video_frame_callback=engine,
+        media_stream_constraints={"video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
+                                  "audio": False},
+        async_processing=True,
+        translations={"start": "Start camera", "stop": "Stop camera", "select_device": "Switch camera"},
+    )
+    if not ctx.state.playing:
+        cam_off_ph.markdown('<div class="camera-off"><strong>Camera is off</strong>'
+                            'Press Start camera below and allow access.</div>', unsafe_allow_html=True)
+    st.markdown('<p class="camera-note">Hold a sign steady to add it. Make a fist for a space. '
+                'To repeat a sign, lower your hand for a moment.</p>', unsafe_allow_html=True)
 
-with tab_live:
-    cam_col, side_col = st.columns([3, 2], gap="medium")
-    with cam_col:
-        ctx = webrtc_streamer(
-            key="signlang-live",
-            mode=WebRtcMode.SENDRECV,
-            video_frame_callback=engine,
-            media_stream_constraints={"video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
-                                      "audio": False},
-            async_processing=True,
-        )
-        st.caption("Click **START** and allow camera access. Hold a sign for the hold time to add it; "
-                   "show **Fist** to insert a space. To repeat a sign, lower your hand briefly.")
+with side_col:
+    pred_ph = st.empty()
+    sentence_ph = st.empty()
+    controls = st.container(key="controls")
+    b1, b2, b3 = controls.columns(3)
+    b4, b5, b6 = controls.columns(3)
+    if b1.button("Add sign", width="stretch", help="Add the current sign right now"):
+        engine.add_current()
+    if b2.button("Space", width="stretch"):
+        engine.edit("space")
+    if b3.button("Delete", width="stretch", help="Delete the last character"):
+        engine.edit("backspace")
+    if b4.button("Undo", width="stretch", help="Remove the last added sign"):
+        engine.edit("undo")
+    if b5.button("Clear", width="stretch"):
+        engine.edit("clear")
+    speak_clicked = b6.button("🔊 Speak", width="stretch", type="primary")
+    auto_speak = st.toggle("Speak each word as it's added", False,
+                           help="Auto speak: reads each new word aloud as soon as it's added.")
+    audio_ph = st.empty()
+    save_ph = st.empty()
 
-    with side_col:
-        gesture_ph = st.empty()
-        st.markdown('<div class="k" style="margin-top:0.2rem"><span>💬 Sentence</span></div>',
-                    unsafe_allow_html=True)
-        sentence_ph = st.empty()
-        b1, b2, b3 = st.columns(3)
-        b4, b5, b6 = st.columns(3)
-        if b1.button("➕ Add sign", width="stretch", help="Add the current sign right now"):
-            engine.add_current()
-        if b2.button("␣ Space", width="stretch"):
-            engine.edit("space")
-        if b3.button("⌫ Delete", width="stretch", help="Delete the last character"):
-            engine.edit("backspace")
-        if b4.button("↶ Undo", width="stretch", help="Remove the last added sign"):
-            engine.edit("undo")
-        if b5.button("🗑 Clear", width="stretch"):
-            engine.edit("clear")
-        speak_clicked = b6.button("🔊 Speak", width="stretch", type="primary")
-        audio_ph = st.empty()
+    snap = engine.get()
+    pred_ph.markdown(prediction_html(snap, ctx.state.playing), unsafe_allow_html=True)
+    sentence_ph.markdown(sentence_html(snap["text"]), unsafe_allow_html=True)
+    if speak_clicked:
+        play(snap["text"], audio_ph)
+    if snap["text"]:
+        save_ph.download_button("Save as text", snap["text"], file_name="signlang.txt",
+                                type="tertiary", on_click="ignore")
 
-        snap = engine.get()
-        gesture_ph.markdown(gesture_html(snap if ctx.state.playing else None), unsafe_allow_html=True)
-        sentence_ph.markdown(sentence_html(snap["text"]), unsafe_allow_html=True)
-        if speak_clicked:
-            play(snap["text"], audio_ph)
-        if snap["text"]:
-            st.download_button("⬇ Save text", snap["text"], file_name="signlang.txt", width="stretch")
 
-    # Live refresh: keep updating the side panel while the stream runs.
-    # Any button click interrupts this loop with a rerun, which is what we want.
-    last_chunks = snap["n_chunks"]
-    while ctx.state.playing:
-        snap = engine.get()
-        gesture_ph.markdown(gesture_html(snap), unsafe_allow_html=True)
-        sentence_ph.markdown(sentence_html(snap["text"]), unsafe_allow_html=True)
-        if auto_speak and snap["n_chunks"] > last_chunks:
-            new = snap["last_chunk"].strip()
-            if len(new) > 1:  # speak words/phrases, not single letters
-                play(new, audio_ph)
-        last_chunks = snap["n_chunks"]
-        time.sleep(0.12)
+# ── Everything else, tucked away ─────────────────────────────────────────────
+st.markdown('<div style="height:2.5rem"></div>', unsafe_allow_html=True)
 
-with tab_upload:
+with st.expander("Recognize a photo"):
     up = st.file_uploader("Upload a photo of a hand sign (JPG / PNG)", type=["jpg", "jpeg", "png"])
     if up:
         img = np.array(Image.open(up).convert("RGB"))
@@ -346,40 +345,44 @@ with tab_upload:
             top = np.argsort(probs)[::-1][:3]
             results.append((h, [(classifier.labels[i], float(probs[i])) for i in top]))
             draw_hand(annotated, h, classifier.labels[top[0]])
-        lcol, rcol = st.columns([3, 2], gap="medium")
+        lcol, rcol = st.columns([3, 2], gap="large")
         with lcol:
             t1, t2 = st.tabs(["With landmarks", "Original"])
             t1.image(annotated, width="stretch")
             t2.image(img, width="stretch")
         with rcol:
             if not results:
-                st.info("No hand detected — try a clearer photo with good lighting and the whole hand visible.")
+                st.info("No hand found. Try a well-lit photo with the whole hand in view.")
             for h, top3 in results:
-                lbl, c = top3[0]
+                lbl, _ = top3[0]
                 rows = "".join(
-                    f'<div class="k" style="margin-top:0.4rem"><span>{html.escape(l)}</span>'
-                    f'<span class="pct">{p:.0%}</span></div>'
-                    f'<div class="track"><div class="fill" style="width:{p*100:.0f}%"></div></div>'
+                    f'<div class="pred-row"><span class="pred-pct">{p:.0%}</span>'
+                    f'<div class="bar"><i style="width:{p*100:.0f}%"></i></div>'
+                    f'<span style="min-width:5.5rem">{html.escape(l)}</span></div>'
                     for l, p in top3)
-                st.markdown(f'<div class="panel"><div class="k"><span>{h.handedness.upper()} hand</span></div>'
-                            f'<div class="gesture-text">{html.escape(lbl)}</div>'
-                            f'<div class="sub">Top 3 predictions</div>{rows}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="pred"><div class="pred-label">{h.handedness} hand</div>'
+                            f'<div class="pred-sign">{html.escape(lbl)}</div>'
+                            f'<div class="pred-hint">Top 3 predictions</div>{rows}</div>',
+                            unsafe_allow_html=True)
 
-with tab_model:
+with st.expander("Accuracy and training data"):
     if not metrics:
-        st.info("No metrics yet — run `python train.py` to generate them.")
+        st.info("No metrics yet. Run `python train.py` to generate them.")
     else:
         import pandas as pd
 
-        st.markdown("Numbers below are on a **held-out test set** the model never saw during training "
-                    "or model selection. *Left-hand accuracy* re-runs the same test set with every hand "
+        st.markdown("Measured on a **held-out test set** the model never saw during training or "
+                    "model selection. *Left-hand accuracy* re-runs that test set with every hand "
                     "mirrored.")
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3 = st.columns(3)
         m1.metric("Test accuracy", f"{metrics['test_accuracy']*100:.1f}%")
         m2.metric("Macro-F1", f"{metrics['test_macro_f1']*100:.1f}%",
                   help="Average F1 across classes, so every class counts equally regardless of size.")
         m3.metric("Left-hand accuracy", f"{metrics['test_accuracy_mirrored']*100:.1f}%")
-        m4.metric("Train / val / test", "{train} / {val} / {test}".format(**metrics["split"]))
+        m4, m5, m6 = st.columns(3)
+        m4.metric("Training samples", f"{sum(metrics['class_counts'].values()):,}")
+        m5.metric("Gestures", len(classifier.labels))
+        m6.metric("Train / val / test", "{train} / {val} / {test}".format(**metrics["split"]))
 
         counts = metrics["class_counts"]
         df = pd.DataFrame([
@@ -392,30 +395,37 @@ with tab_model:
         low = df[df["Samples"] < 50]["Gesture"].tolist()
         if low:
             st.warning(f"Low on data: **{', '.join(low)}**. Collect more with "
-                       f"`python collect_data.py --fill 100` and retrain — results for these "
+                       f"`python collect_data.py --fill 100` and retrain. Results for these "
                        f"classes are based on very few test samples.")
-        c1, c2 = st.columns([1, 1], gap="large")
+        c1, c2 = st.columns(2, gap="large")
         with c1:
-            st.markdown("##### Samples per gesture")
-            st.bar_chart(df.set_index("Gesture")["Samples"], color="#5b5bd6", horizontal=True, height=380)
+            st.markdown("**Samples per gesture**")
+            st.bar_chart(df.set_index("Gesture")["Samples"], color="#3F44C8", horizontal=True, height=380)
         with c2:
-            st.markdown("##### Per-class test results")
+            st.markdown("**Per-class test results**")
             st.dataframe(df.sort_values("F1"), hide_index=True, width="stretch", height=380,
                          column_config={k: st.column_config.ProgressColumn(k, format="%.2f", min_value=0, max_value=1)
                                         for k in ("Precision", "Recall", "F1")})
-        c3, c4 = st.columns([1, 1], gap="large")
+        c3, c4 = st.columns(2, gap="large")
         if (STATIC_DIR / "confusion_matrix.png").exists():
             c3.image(str(STATIC_DIR / "confusion_matrix.png"), width="stretch")
         if (STATIC_DIR / "training_curves.png").exists():
             c4.image(str(STATIC_DIR / "training_curves.png"), width="stretch")
-        st.caption(f"Trained with class-weighted loss: {metrics['class_weights']} · augmentation: "
-                   f"{metrics['augment']} (strength {metrics.get('aug_strength', 1.0)}) · best epoch "
-                   f"{metrics['best_epoch']}/{metrics['epochs']}")
+        st.caption(f"Trained with class-weighted loss: {metrics['class_weights']}. Augmentation: "
+                   f"{metrics['augment']} (strength {metrics.get('aug_strength', 1.0)}). Best epoch "
+                   f"{metrics['best_epoch']} of {metrics['epochs']}.")
 
-with tab_about:
+with st.expander("Sign vocabulary"):
+    st.markdown("What each sign adds to your sentence.")
+    st.markdown('<div class="vocab">' + "".join(
+        f'<div>{html.escape(k)} <span>→ {"space" if v == SPACE else html.escape(v)}</span></div>'
+        for k, v in GESTURE_TEXT.items() if k in classifier.labels) + "</div>", unsafe_allow_html=True)
+    st.caption("To change these, edit `GESTURE_TEXT` in `signlang/config.py`.")
+
+with st.expander("How it works and training your own model"):
     c1, c2 = st.columns(2, gap="large")
     with c1:
-        st.markdown("#### 🏗️ Pipeline")
+        st.markdown("**Pipeline**")
         st.code("""Browser camera ── WebRTC ──► server
 → MediaPipe Hands: 21 landmarks (x, y, z)
 → normalize: wrist origin, scale to [-1, 1]
@@ -426,11 +436,30 @@ with tab_about:
 → hold-to-commit sentence builder
 → text-to-speech (gTTS / pyttsx3)""", language="text")
     with c2:
-        st.markdown("#### 🧠 Training")
+        st.markdown("**Training**")
         st.markdown("""
-- Stratified **70 / 15 / 15** train / val / test split
-- **Class-weighted** cross-entropy for imbalanced classes
-- **Augmentation**: left/right mirroring, rotation, stretch, landmark jitter
-- Checkpoint chosen by validation **macro-F1**
-- Per-class report + confusion matrix on the held-out test set
+- Stratified 70 / 15 / 15 train / val / test split
+- Class-weighted cross-entropy for imbalanced classes
+- Augmentation: left/right mirroring, rotation, stretch, landmark jitter
+- Checkpoint chosen by validation macro-F1
+- Per-class report and confusion matrix on the held-out test set
 """)
+        st.markdown("**Add data and retrain** (run in a terminal, then restart the app)")
+        st.code("# top up every gesture to 100 samples\npython collect_data.py --fill 100\n\n"
+                "# retrain and refresh these metrics\npython train.py", language="bash")
+
+
+# ── Live refresh ─────────────────────────────────────────────────────────────
+# Kept last: this loop blocks the script while the camera runs, so everything above
+# must already be rendered. Any button click interrupts it with a rerun.
+last_chunks = snap["n_chunks"]
+while ctx.state.playing:
+    snap = engine.get()
+    pred_ph.markdown(prediction_html(snap, True), unsafe_allow_html=True)
+    sentence_ph.markdown(sentence_html(snap["text"]), unsafe_allow_html=True)
+    if auto_speak and snap["n_chunks"] > last_chunks:
+        new = snap["last_chunk"].strip()
+        if len(new) > 1:  # speak words/phrases, not single letters
+            play(new, audio_ph)
+    last_chunks = snap["n_chunks"]
+    time.sleep(0.12)
