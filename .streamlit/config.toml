@@ -1,0 +1,15 @@
+[theme]
+base = "light"
+primaryColor = "#3F44C8"
+backgroundColor = "#F5F6F8"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#16181D"
+borderColor = "#DDE0E6"
+font = "'Atkinson Hyperlegible':https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap"
+baseRadius = "10px"
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+maxUploadSize = 10
