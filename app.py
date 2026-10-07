@@ -7,6 +7,7 @@ The webcam runs through streamlit-webrtc, so the camera is the *viewer's* camera
 (works when deployed, not just on localhost).
 """
 
+import base64
 import html
 import json
 import threading
@@ -258,9 +259,18 @@ def sentence_html(text):
 def play(text, ph):
     try:
         audio, mime = speak(text, tts_engine)
-        ph.audio(audio, format=mime, autoplay=True)
     except TTSError as e:
         ph.warning(str(e))
+        return
+    # Not st.audio: it takes no `key` and derives its element ID from the audio bytes,
+    # so speaking the same phrase twice in one script run (auto-speak during a live
+    # stream, or Speak + auto-speak) raises StreamlitDuplicateElementId. A plain
+    # <audio> tag has no element ID; the counter makes every call a fresh element,
+    # so repeats replay instead of being treated as unchanged.
+    st.session_state.tts_count = st.session_state.get("tts_count", 0) + 1
+    b64 = base64.b64encode(audio).decode()
+    ph.html(f'<audio data-tts="{st.session_state.tts_count}" controls autoplay '
+            f'style="width:100%" src="data:{mime};base64,{b64}"></audio>')
 
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
