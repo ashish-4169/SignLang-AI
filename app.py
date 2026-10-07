@@ -1,664 +1,426 @@
 """
-SignLang AI — Clean Modern UI (white cards, professional layout)
+SignLang AI — real-time sign recognition with a sentence builder and text-to-speech.
+
+    streamlit run app.py
+
+The webcam runs through streamlit-webrtc, so the camera is the *viewer's* camera
+(works when deployed, not just on localhost).
 """
 
-import streamlit as st
+import html
+import json
+import threading
+import time
+
+import av
 import cv2
 import numpy as np
+import streamlit as st
 from PIL import Image
-import time, math, os
-import torch
-import torch.nn as nn
+from streamlit_webrtc import WebRtcMode, webrtc_streamer
 
-st.set_page_config(page_title="SignLang AI", page_icon="🤟",
-                   layout="wide", initial_sidebar_state="collapsed")
+from signlang.config import GESTURE_TEXT, METRICS_PATH, MODEL_PATH, SPACE, STATIC_DIR
+from signlang.landmarks import HandDetector, draw_hand
+from signlang.model import GestureClassifier
+from signlang.sentence import PredictionSmoother, SentenceBuilder
+from signlang.tts import TTSError, synthesize
+
+st.set_page_config(page_title="SignLang AI", page_icon="🤟", layout="wide")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+html, body, .stApp { font-family: 'Inter', sans-serif; }
+#MainMenu, footer { visibility: hidden; }
+.block-container { padding-top: 1.2rem; max-width: 1280px; }
 
-*, *::before, *::after { box-sizing: border-box; }
-html, body, [class*="css"], .stApp {
-    background: #f0f2f8 !important;
-    font-family: 'Inter', sans-serif !important;
-    color: #1a1f36 !important;
-}
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding: 0 !important; max-width: 100% !important; }
+.navbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.2rem; }
+.nav-logo { font-size:1.45rem; font-weight:800; color:#1a1f36; letter-spacing:-0.5px; }
+.nav-logo span { color:#5b5bd6; }
+.nav-badge { background:linear-gradient(135deg,#5b5bd6,#7c6af7); color:#fff; border-radius:20px;
+             padding:0.3rem 1rem; font-size:0.72rem; font-weight:600; letter-spacing:0.5px; }
 
-/* ── TOP NAVBAR ── */
-.navbar {
-    background: #ffffff;
-    border-bottom: 1px solid #e8eaf2;
-    padding: 0.9rem 2.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-}
-.nav-logo {
-    font-size: 1.3rem;
-    font-weight: 800;
-    color: #1a1f36;
-    letter-spacing: -0.5px;
-}
-.nav-logo span { color: #5b5bd6; }
-.nav-badge {
-    background: linear-gradient(135deg, #5b5bd6, #7c6af7);
-    color: white;
-    border-radius: 20px;
-    padding: 0.3rem 1rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-}
-.nav-links { display: flex; gap: 2rem; }
-.nav-link { color: #6b7280; font-size: 0.85rem; font-weight: 500; text-decoration: none; }
+.stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1.2rem; }
+@media (max-width: 800px) { .stats-row { grid-template-columns:repeat(2,1fr); } }
+.stat-card { background:#fff; border-radius:14px; padding:1rem 1.2rem; display:flex; align-items:center;
+             gap:0.9rem; box-shadow:0 1px 3px rgba(0,0,0,0.06); border:1px solid #eef0f6; }
+.stat-icon { width:42px; height:42px; border-radius:12px; display:flex; align-items:center;
+             justify-content:center; font-size:1.15rem; flex-shrink:0; }
+.i-purple{background:#ede9fe} .i-green{background:#dcfce7} .i-orange{background:#ffedd5} .i-blue{background:#dbeafe}
+.stat-val { font-size:1.4rem; font-weight:800; color:#1a1f36; line-height:1; }
+.stat-lbl { font-size:0.66rem; font-weight:600; color:#9ca3af; text-transform:uppercase; letter-spacing:1px; margin-top:0.25rem; }
 
-/* ── PAGE WRAPPER ── */
-.page-wrap { padding: 1.8rem 2.5rem 4rem; }
-
-/* ── STAT CARDS ROW ── */
-.stats-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-}
-.stat-card {
-    background: white;
-    border-radius: 14px;
-    padding: 1.1rem 1.4rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    border: 1px solid #f0f2f8;
-}
-.stat-icon {
-    width: 44px; height: 44px;
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.2rem;
-    flex-shrink: 0;
-}
-.stat-icon-purple { background: #ede9fe; }
-.stat-icon-green  { background: #dcfce7; }
-.stat-icon-orange { background: #ffedd5; }
-.stat-icon-blue   { background: #dbeafe; }
-.stat-val { font-size: 1.5rem; font-weight: 800; color: #1a1f36; line-height: 1; }
-.stat-lbl { font-size: 0.7rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-top: 0.2rem; }
-
-/* ── MAIN GRID ── */
-.main-grid {
-    display: grid;
-    grid-template-columns: 1.5fr 1fr;
-    gap: 1.2rem;
-}
-
-/* ── CARD ── */
-.card {
-    background: white;
-    border-radius: 16px;
-    border: 1px solid #f0f2f8;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    overflow: hidden;
-}
-.card-header {
-    padding: 1rem 1.4rem 0.8rem;
-    border-bottom: 1px solid #f5f6fa;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-.card-header-icon {
-    width: 28px; height: 28px;
-    border-radius: 8px;
-    background: #ede9fe;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 0.85rem;
-}
-.card-title {
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: #6b7280;
-}
-.live-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #22c55e;
-    display: inline-block;
-    margin-left: auto;
-    animation: pulse 1.5s infinite;
-}
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-.live-label {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: #22c55e;
-    margin-left: 0.4rem;
-}
-.card-body { padding: 1.2rem 1.4rem; }
-
-/* ── CAM PLACEHOLDER ── */
-.cam-empty {
-    background: #f8f9fc;
-    border-radius: 12px;
-    height: 340px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-    border: 2px dashed #e0e4f0;
-}
-.cam-empty-icon { font-size: 2.5rem; opacity: 0.3; }
-.cam-empty-text { font-size: 0.82rem; color: #9ca3af; font-weight: 500; }
-
-/* ── GESTURE DISPLAY ── */
-.gesture-label {
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: #9ca3af;
-    margin-bottom: 0.3rem;
-}
-.gesture-text {
-    font-size: 3rem;
-    font-weight: 800;
-    color: #1a1f36;
-    line-height: 1.1;
-    margin-bottom: 0.2rem;
-    letter-spacing: -1px;
-}
-.gesture-empty { color: #d1d5db; font-size: 2rem; }
-.gesture-hand {
-    font-size: 0.75rem;
-    color: #9ca3af;
-    font-weight: 500;
-    margin-bottom: 1rem;
-}
-
-/* ── CONFIDENCE ── */
-.conf-label {
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: #9ca3af;
-    margin-bottom: 0.4rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.conf-pct { font-size: 0.9rem; font-weight: 700; color: #22c55e; }
-.conf-track {
-    background: #f0f2f8;
-    border-radius: 6px;
-    height: 8px;
-    overflow: hidden;
-    margin-bottom: 1rem;
-}
-.conf-fill {
-    height: 100%;
-    border-radius: 6px;
-    background: linear-gradient(90deg, #5b5bd6, #22c55e);
-    transition: width 0.2s ease;
-}
-
-/* ── NN BADGE ── */
-.nn-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: #ede9fe;
-    border: 1px solid #c4b5fd;
-    border-radius: 20px;
-    padding: 0.3rem 0.8rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: #5b5bd6;
-    margin-bottom: 1.2rem;
-}
-
-/* ── SENTENCE ── */
-.sent-label {
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: #9ca3af;
-    margin-bottom: 0.5rem;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-.sent-box {
-    background: #f8f9fc;
-    border: 1px solid #e8eaf2;
-    border-radius: 10px;
-    padding: 0.9rem 1rem;
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: #1a1f36;
-    min-height: 3.2rem;
-    letter-spacing: 3px;
-    margin-bottom: 0.8rem;
-    word-break: break-all;
-}
-.sent-placeholder { color: #d1d5db; font-size: 0.9rem; font-weight: 400; letter-spacing: 0; }
-
-/* ── BUTTONS ── */
-.stButton > button {
-    border-radius: 10px !important;
-    font-size: 0.8rem !important;
-    font-weight: 600 !important;
-    padding: 0.55rem 0.8rem !important;
-    transition: all 0.15s !important;
-    border: 1px solid #e8eaf2 !important;
-    background: white !important;
-    color: #1a1f36 !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-}
-.stButton > button:hover {
-    background: #f5f6fa !important;
-    border-color: #c4b5fd !important;
-    color: #5b5bd6 !important;
-}
-.stButton > button:first-child { background: #5b5bd6 !important; color: white !important; border-color: #5b5bd6 !important; }
-.stButton > button:first-child:hover { background: #4e4ec7 !important; }
-
-/* ── TOGGLE ── */
-label[data-baseweb="checkbox"] span { color: #6b7280 !important; font-size: 0.85rem !important; font-weight: 500 !important; }
-
-/* ── TABS ── */
-.stTabs [data-baseweb="tab-list"] {
-    background: transparent !important;
-    gap: 0.2rem !important;
-    border-bottom: none !important;
-    margin-bottom: 1.2rem !important;
-}
-.stTabs [data-baseweb="tab"] {
-    background: white !important;
-    border: 1px solid #e8eaf2 !important;
-    border-radius: 10px !important;
-    color: #6b7280 !important;
-    font-size: 0.82rem !important;
-    font-weight: 600 !important;
-    padding: 0.5rem 1.2rem !important;
-}
-.stTabs [aria-selected="true"] {
-    background: #5b5bd6 !important;
-    color: white !important;
-    border-color: #5b5bd6 !important;
-}
-.stTabs [data-baseweb="tab-panel"] { padding-top: 0 !important; }
-
-/* ── SLIDER ── */
-.stSlider label { color: #6b7280 !important; font-size: 0.8rem !important; }
-
-/* ── UPLOAD ── */
-[data-testid="stFileUploader"] {
-    background: white !important;
-    border: 2px dashed #e0e4f0 !important;
-    border-radius: 14px !important;
-}
-
-/* ── SIDEBAR ── */
-section[data-testid="stSidebar"] { background: white !important; border-right: 1px solid #e8eaf2 !important; }
-section[data-testid="stSidebar"] * { color: #6b7280 !important; font-size: 0.82rem !important; }
-
-/* ── FPS OVERLAY ── */
-.fps-badge {
-    display: inline-block;
-    background: rgba(0,0,0,0.6);
-    color: white;
-    border-radius: 6px;
-    padding: 0.2rem 0.6rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-}
+.panel { background:#fff; border:1px solid #eef0f6; border-radius:16px; padding:1.1rem 1.3rem;
+         box-shadow:0 1px 3px rgba(0,0,0,0.06); margin-bottom:0.9rem; }
+.k { font-size:0.66rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#9ca3af;
+     display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem; }
+.gesture-text { font-size:2.8rem; font-weight:800; color:#1a1f36; line-height:1.1; letter-spacing:-1px; }
+.gesture-empty { color:#d1d5db; }
+.sub { font-size:0.78rem; color:#9ca3af; font-weight:500; margin:0.15rem 0 0.8rem; }
+.pct { font-size:0.9rem; font-weight:700; color:#16a34a; letter-spacing:0; }
+.track { background:#f0f2f8; border-radius:6px; height:8px; overflow:hidden; margin-bottom:0.8rem; }
+.fill { height:100%; border-radius:6px; background:linear-gradient(90deg,#5b5bd6,#22c55e); }
+.fill-hold { height:100%; border-radius:6px; background:#f59e0b; }
+.sent-box { background:#f8f9fc; border:1px solid #e8eaf2; border-radius:10px; padding:0.9rem 1rem;
+            font-size:1.35rem; font-weight:700; color:#1a1f36; min-height:3.4rem; word-break:break-word;
+            white-space:pre-wrap; }
+.sent-placeholder { color:#c4c9d4; font-size:0.9rem; font-weight:400; }
+.cursor { display:inline-block; width:2px; height:1.2em; background:#5b5bd6; vertical-align:text-bottom;
+          animation:blink 1s step-end infinite; margin-left:1px; }
+@keyframes blink { 50% { opacity:0; } }
+.chip { display:inline-block; background:#f5f3ff; border:1px solid #ddd6fe; color:#5b5bd6; border-radius:8px;
+        padding:0.15rem 0.5rem; font-size:0.72rem; font-weight:600; margin:0 0.3rem 0.35rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Model ─────────────────────────────────────────────────────────────────────
-class GestureNet(nn.Module):
-    def __init__(self, input_dim=63, num_classes=14):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim,256),nn.BatchNorm1d(256),nn.ReLU(),nn.Dropout(0.3),
-            nn.Linear(256,128),nn.BatchNorm1d(128),nn.ReLU(),nn.Dropout(0.2),
-            nn.Linear(128,64),nn.ReLU(),nn.Linear(64,num_classes))
-    def forward(self,x): return self.net(x)
 
-def find_model():
-    for root,_,files in os.walk("."):
-        for f in files:
-            if f=="gesture_model.pth": return os.path.join(root,f)
-    return None
+# ── Resources ────────────────────────────────────────────────────────────────
+@st.cache_resource
+def load_classifier():
+    return GestureClassifier.load(MODEL_PATH) if MODEL_PATH.exists() else None
+
 
 @st.cache_resource
-def load_all():
-    import mediapipe as mp
-    try:
-        hands=mp.solutions.hands.Hands(static_image_mode=False,max_num_hands=2,
-              min_detection_confidence=0.7,min_tracking_confidence=0.6)
-        api_type,mp_mod="legacy",mp.solutions.hands
-    except:
-        import urllib.request
-        mf="hand_landmarker.task"
-        if not os.path.exists(mf):
-            urllib.request.urlretrieve(
-                "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",mf)
-        from mediapipe.tasks import python as mp_python
-        from mediapipe.tasks.python import vision as mp_vision
-        opts=mp_vision.HandLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=mf),
-            num_hands=2,min_hand_detection_confidence=0.7,
-            min_hand_presence_confidence=0.6,min_tracking_confidence=0.6,
-            running_mode=mp_vision.RunningMode.IMAGE)
-        hands=mp_vision.HandLandmarker.create_from_options(opts)
-        api_type,mp_mod="tasks",None
-    mp_path=find_model(); g_model,labels=None,None
-    if mp_path:
-        ck=torch.load(mp_path,map_location="cpu")
-        labels=ck["labels"]
-        g_model=GestureNet(63,len(labels))
-        g_model.load_state_dict(ck["model_state"])
-        g_model.eval()
-    return api_type,hands,mp_mod,g_model,labels
+def load_image_detector():
+    return HandDetector(max_hands=2, static_image=True, min_detection_confidence=0.5)
 
-def norm_lm(lm):
-    c=np.array([[l[0],l[1],l[2]] for l in lm],dtype=np.float32)
-    c-=c[0]; c/=(np.max(np.abs(c))+1e-8); return c.flatten()
 
-def classify(lm,handedness,g_model,labels):
-    if g_model and labels:
-        t=torch.tensor(norm_lm(lm),dtype=torch.float32).unsqueeze(0)
-        with torch.no_grad():
-            pr=torch.softmax(g_model(t),1); c,i=pr.max(1)
-        return labels[i.item()],float(c.item()),"nn"
-    def d(i,j): return math.sqrt((lm[i][0]-lm[j][0])**2+(lm[i][1]-lm[j][1])**2)
-    f=[1 if(lm[4][0]<lm[3][0] if handedness=="Right" else lm[4][0]>lm[3][0])else 0]
-    for tip in [8,12,16,20]: f.append(1 if lm[tip][1]<lm[tip-2][1] else 0)
-    imd=d(8,12)
-    if f==[1,1,1,1,1]: return("Hello",0.90,"rules")
-    if f==[1,0,0,0,0]: return("ThumbsUp",0.90,"rules")
-    if f==[1,0,0,0,1]: return("CallMe",0.90,"rules")
-    if f==[1,1,0,0,1]: return("ILoveYou",0.90,"rules")
-    if f==[0,1,1,0,0] and imd>0.06: return("Peace",0.90,"rules")
-    if f==[0,0,0,0,0]: return("Fist",0.90,"rules")
-    if f==[0,1,0,0,0]: return("Pointing",0.90,"rules")
-    if f==[1,1,0,0,0]: return("L",0.90,"rules")
-    if f==[0,0,0,0,1]: return("I",0.90,"rules")
-    return("...",0.30,"rules")
+@st.cache_data
+def load_metrics():
+    return json.loads(METRICS_PATH.read_text()) if METRICS_PATH.exists() else None
 
-def process(img_rgb,api_type,hands_det,mp_mod,g_model,labels):
-    import mediapipe as mp
-    frame=cv2.cvtColor(img_rgb,cv2.COLOR_RGB2BGR)
-    h,w=frame.shape[:2]; dets=[]
-    if api_type=="legacy":
-        res=hands_det.process(img_rgb)
-        if res.multi_hand_landmarks:
-            for hl,hi in zip(res.multi_hand_landmarks,res.multi_handedness):
-                hd=hi.classification[0].label
-                lm=[(l.x,l.y,l.z) for l in hl.landmark]
-                lb,cf,mt=classify(lm,hd,g_model,labels)
-                dets.append({"label":lb,"confidence":cf,"method":mt,"handedness":hd})
-                for conn in mp.solutions.hands.HAND_CONNECTIONS:
-                    p1,p2=hl.landmark[conn[0]],hl.landmark[conn[1]]
-                    cv2.line(frame,(int(p1.x*w),int(p1.y*h)),(int(p2.x*w),int(p2.y*h)),(91,91,214),2)
-                for l in hl.landmark:
-                    cv2.circle(frame,(int(l.x*w),int(l.y*h)),5,(34,197,94),-1)
-                    cv2.circle(frame,(int(l.x*w),int(l.y*h)),7,(255,255,255),1)
-                wr=hl.landmark[0]
-                cv2.putText(frame,f"{lb}",(int(wr.x*w),int(wr.y*h)-18),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(91,91,214),2)
-    else:
-        mi=mp.Image(image_format=mp.ImageFormat.SRGB,data=img_rgb)
-        res=hands_det.detect(mi)
-        if res.hand_landmarks:
-            for i,hl in enumerate(res.hand_landmarks):
-                hd=res.handedness[i][0].category_name if res.handedness else "Right"
-                lm=[(l.x,l.y,l.z) for l in hl]
-                lb,cf,mt=classify(lm,hd,g_model,labels)
-                dets.append({"label":lb,"confidence":cf,"method":mt,"handedness":hd})
-                for l in hl:
-                    cv2.circle(frame,(int(l.x*w),int(l.y*h)),5,(34,197,94),-1)
-                    cv2.circle(frame,(int(l.x*w),int(l.y*h)),7,(255,255,255),1)
-                wr=hl[0]
-                cv2.putText(frame,f"{lb}",(int(wr.x*w),int(wr.y*h)-18),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.8,(91,91,214),2)
-    return cv2.cvtColor(frame,cv2.COLOR_BGR2RGB),dets
 
-# ── Load ──────────────────────────────────────────────────────────────────────
-with st.spinner("Loading..."):
-    try: api_type,hands_det,mp_mod,g_model,labels=load_all(); ok=True
-    except Exception as e: st.error(f"Load failed: {e}"); st.stop()
+@st.cache_data(show_spinner=False, max_entries=64)
+def speak(text: str, engine: str):
+    return synthesize(text, engine=engine)
 
-if "sentence" not in st.session_state: st.session_state.sentence=""
-if "cur" not in st.session_state: st.session_state.cur=""
-if "conf" not in st.session_state: st.session_state.conf=0.0
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+classifier = load_classifier()
+metrics = load_metrics()
+if classifier is None:
+    st.error(f"No trained model found at `{MODEL_PATH}`. Run `python train.py` first.")
+    st.stop()
+
+
+# ── Live engine (runs in streamlit-webrtc's worker thread) ───────────────────
+class LiveEngine:
+    """Per-session state shared between the video thread and the Streamlit script."""
+
+    def __init__(self, classifier: GestureClassifier):
+        self.classifier = classifier
+        self.lock = threading.Lock()
+        self.builder = SentenceBuilder()
+        self.settings = {"threshold": 0.6, "window": 8, "mirror": True, "show_skeleton": True}
+        self._detector = None
+        self._smoother = PredictionSmoother(window=8)
+        self._fps, self._last_t = 0.0, None
+        self.snapshot = {"label": None, "conf": 0.0, "raw": None, "raw_conf": 0.0,
+                         "hand": None, "progress": 0.0, "fps": 0.0, "text": "", "n_chunks": 0}
+
+    def __call__(self, frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="rgb24")
+        s = dict(self.settings)
+        if s["mirror"]:
+            img = np.ascontiguousarray(img[:, ::-1])
+        if self._detector is None:  # MediaPipe must be created in this thread
+            self._detector = HandDetector(max_hands=2)
+        if self._smoother.window != s["window"]:
+            self._smoother = PredictionSmoother(window=s["window"])
+
+        hands = self._detector.detect(img)
+        preds = [(h, *self.classifier.predict(h.features)) for h in hands]
+        best = max(preds, key=lambda p: p[2]) if preds else None
+        raw, raw_conf = (best[1], best[2]) if best else (None, 0.0)
+        vote = raw if raw_conf >= s["threshold"] else None
+        stable, conf = self._smoother.update(vote, raw_conf)
+
+        with self.lock:
+            self.builder.update(stable)
+            progress = self.builder.progress() if stable else 0.0
+            now = time.monotonic()
+            if self._last_t is not None:
+                self._fps = 0.9 * self._fps + 0.1 / max(now - self._last_t, 1e-3)
+            self._last_t = now
+            self.snapshot = {"label": stable, "conf": conf, "raw": raw, "raw_conf": raw_conf,
+                             "hand": best[0].handedness if best else None, "progress": progress,
+                             "fps": self._fps, "text": self.builder.text,
+                             "n_chunks": len(self.builder.history)}
+
+        if s["show_skeleton"]:
+            for h, lbl, c in preds:
+                draw_hand(img, h, f"{lbl} {c:.0%}" if c >= s["threshold"] else None)
+        hgt, wid = img.shape[:2]
+        if progress > 0:  # hold-to-add bar along the bottom
+            cv2.rectangle(img, (0, hgt - 8), (int(wid * progress), hgt), (245, 158, 11), -1)
+        cv2.rectangle(img, (8, 8), (92, 32), (0, 0, 0), -1)
+        cv2.putText(img, f"FPS {self._fps:4.1f}", (14, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (255, 255, 255), 1, cv2.LINE_AA)
+        return av.VideoFrame.from_ndarray(img, format="rgb24")
+
+    def get(self):
+        with self.lock:
+            h = self.builder.history
+            return dict(self.snapshot, text=self.builder.text, n_chunks=len(h),
+                        last_chunk=h[-1] if h else "")
+
+    def edit(self, action: str):
+        with self.lock:
+            b = self.builder
+            {"space": b.add_space, "backspace": b.backspace, "undo": b.undo, "clear": b.clear}[action]()
+
+    def add_current(self):
+        with self.lock:
+            lbl = self.snapshot["label"]
+            if lbl:
+                self.builder.add_sign(lbl)
+
+
+if "engine" not in st.session_state:
+    st.session_state.engine = LiveEngine(classifier)
+engine: LiveEngine = st.session_state.engine
+
+
+# ── Sidebar settings ─────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("**SignLang AI**")
-    st.markdown("---")
-    st.markdown(f"Model: {'GestureNet' if g_model else 'Rules'}")
-    st.markdown(f"Classes: {len(labels) if labels else 0}")
-    st.markdown("---")
-    conf_threshold=st.slider("Min confidence",0.3,0.95,0.5,0.05)
+    st.markdown("### ⚙️ Settings")
+    engine.settings["threshold"] = st.slider(
+        "Minimum confidence", 0.30, 0.95, 0.60, 0.05,
+        help="Predictions below this are ignored.")
+    engine.settings["window"] = st.slider(
+        "Smoothing window (frames)", 1, 20, 8,
+        help="Majority vote over this many frames. Higher = steadier but slower to react.")
+    engine.builder.hold_seconds = st.slider(
+        "Hold time to add a sign (s)", 0.3, 3.0, 1.0, 0.1,
+        help="How long a sign must be held steady before it's added to the sentence.")
+    engine.settings["mirror"] = st.toggle("Mirror camera (selfie view)", True)
+    engine.settings["show_skeleton"] = st.toggle("Draw hand skeleton", True)
+    st.markdown("### 🔊 Speech")
+    tts_engine = st.radio("Voice", ["auto", "gtts", "offline"], horizontal=True,
+                          format_func={"auto": "Auto", "gtts": "Google", "offline": "Offline"}.get,
+                          help="Google (gTTS) needs internet. Offline uses your OS voice via pyttsx3.")
+    auto_speak = st.toggle("Speak each word as it's added", False)
+    st.markdown("### 🧾 Sign → text")
+    st.markdown("".join(
+        f'<span class="chip">{html.escape(k)} → {"␣ space" if v == SPACE else html.escape(v)}</span>'
+        for k, v in GESTURE_TEXT.items() if k in classifier.labels), unsafe_allow_html=True)
+    st.caption("Edit `GESTURE_TEXT` in `signlang/config.py` to change these.")
 
-# ── Navbar ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="navbar">
-  <div class="nav-logo">Sign<span>Lang</span> AI</div>
-  <div class="nav-badge">🤟 REAL-TIME ASL RECOGNITION</div>
-</div>
-""", unsafe_allow_html=True)
 
-st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
+# ── Header + stats ───────────────────────────────────────────────────────────
+st.markdown("""<div class="navbar"><div class="nav-logo">Sign<span>Lang</span> AI</div>
+<div class="nav-badge">🤟 REAL-TIME SIGN → TEXT → SPEECH</div></div>""", unsafe_allow_html=True)
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1,tab2,tab3=st.tabs(["📷  Webcam","🖼️  Upload","ℹ️  About"])
 
-# ══ WEBCAM ════════════════════════════════════════════════════════════════════
-with tab1:
-    # Stats row
-    st.markdown("""
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-icon stat-icon-purple">🎯</div>
-        <div><div class="stat-val">98%</div><div class="stat-lbl">Accuracy</div></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon stat-icon-green">🖐️</div>
-        <div><div class="stat-val">21</div><div class="stat-lbl">Landmarks</div></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon stat-icon-orange">⚡</div>
-        <div><div class="stat-val">30fps</div><div class="stat-lbl">Inference</div></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon stat-icon-blue">🤟</div>
-        <div><div class="stat-val">14</div><div class="stat-lbl">Gestures</div></div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+def stat(icon, cls, val, lbl):
+    return (f'<div class="stat-card"><div class="stat-icon {cls}">{icon}</div>'
+            f'<div><div class="stat-val">{val}</div><div class="stat-lbl">{lbl}</div></div></div>')
 
-    left,right=st.columns([3,2],gap="medium")
 
-    with left:
-        # Camera card header
-        run=st.toggle("🎥  Enable live detection", key="cam_toggle")
-        f_ph=st.empty()
-        if not run:
-            f_ph.markdown("""
-            <div class="cam-empty">
-              <div class="cam-empty-icon">📷</div>
-              <div class="cam-empty-text">Toggle live detection to start</div>
-            </div>""",unsafe_allow_html=True)
+acc = f"{metrics['test_accuracy']*100:.0f}%" if metrics else "—"
+left = f"{metrics['test_accuracy_mirrored']*100:.0f}%" if metrics else "—"
+n_samples = sum(metrics["class_counts"].values()) if metrics else "—"
+st.markdown('<div class="stats-row">' +
+            stat("🎯", "i-purple", acc, "Test accuracy") +
+            stat("🫲", "i-green", left, "Left-hand accuracy") +
+            stat("🗂️", "i-orange", f"{n_samples:,}" if metrics else "—", "Training samples") +
+            stat("🤟", "i-blue", len(classifier.labels), "Gestures") +
+            "</div>", unsafe_allow_html=True)
 
-    with right:
-        # Detection card
-        g_ph=st.empty()
-        cf_ph=st.empty()
-        mt_ph=st.empty()
 
-        # Sentence
-        st.markdown('<div class="sent-label">💬 SENTENCE</div>',unsafe_allow_html=True)
-        s_ph=st.empty()
+# ── Render helpers ───────────────────────────────────────────────────────────
+def gesture_html(snap):
+    if not snap or not snap["label"]:
+        raw = snap and snap["raw"]
+        hint = (f"Seeing <b>{html.escape(raw)}</b> ({snap['raw_conf']:.0%}) — hold steady…" if raw
+                else "Show your hand to the camera")
+        return (f'<div class="panel"><div class="k"><span>Gesture</span></div>'
+                f'<div class="gesture-text gesture-empty">—</div><div class="sub">{hint}</div>'
+                f'<div class="k"><span>Confidence</span><span class="pct">—</span></div>'
+                f'<div class="track"><div class="fill" style="width:0%"></div></div></div>')
+    pct = int(snap["conf"] * 100)
+    hold = int(snap["progress"] * 100)
+    token = GESTURE_TEXT.get(snap["label"], snap["label"])
+    adds = "space" if token == SPACE else f"“{html.escape(token)}”"
+    return (f'<div class="panel"><div class="k"><span>Gesture · {html.escape((snap["hand"] or "").upper())} hand</span></div>'
+            f'<div class="gesture-text">{html.escape(snap["label"])}</div>'
+            f'<div class="sub">adds {adds} · {snap["fps"]:.0f} fps</div>'
+            f'<div class="k"><span>Confidence</span><span class="pct">{pct}%</span></div>'
+            f'<div class="track"><div class="fill" style="width:{pct}%"></div></div>'
+            f'<div class="k"><span>Hold to add</span><span class="pct" style="color:#d97706">{hold}%</span></div>'
+            f'<div class="track"><div class="fill-hold" style="width:{hold}%"></div></div></div>')
 
-        ca,cb,cc=st.columns(3)
-        add_b=ca.button("Add",use_container_width=True,key="add")
-        spc_b=cb.button("Space",use_container_width=True,key="spc")
-        clr_b=cc.button("Clear",use_container_width=True,key="clr")
 
-        if add_b and st.session_state.cur and st.session_state.conf>=conf_threshold:
-            lbl=st.session_state.cur
-            if len(lbl)==1: st.session_state.sentence+=lbl
-        if spc_b: st.session_state.sentence+=" "
-        if clr_b: st.session_state.sentence=""
+def sentence_html(text):
+    body = html.escape(text) if text else '<span class="sent-placeholder">Hold a sign steady to start typing…</span>'
+    return f'<div class="sent-box">{body}<span class="cursor"></span></div>'
 
-        sent=st.session_state.sentence
-        if sent.strip():
-            s_ph.markdown(f'<div class="sent-box">{sent}</div>',unsafe_allow_html=True)
-        else:
-            s_ph.markdown('<div class="sent-box"><span class="sent-placeholder">Start signing...</span></div>',unsafe_allow_html=True)
 
-        # Default gesture display
-        g_ph.markdown("""
-        <div style="padding:0.5rem 0 1rem">
-          <div class="gesture-label">GESTURE</div>
-          <div class="gesture-text gesture-empty">—</div>
-          <div class="gesture-hand">Show your hand to the camera</div>
-        </div>""",unsafe_allow_html=True)
-        cf_ph.markdown("""
-        <div>
-          <div class="conf-label"><span>CONFIDENCE</span><span class="conf-pct">—</span></div>
-          <div class="conf-track"><div class="conf-fill" style="width:0%"></div></div>
-        </div>""",unsafe_allow_html=True)
+def play(text, ph):
+    try:
+        audio, mime = speak(text, tts_engine)
+        ph.audio(audio, format=mime, autoplay=True)
+    except TTSError as e:
+        ph.warning(str(e))
 
-    # Camera loop
-    if run:
-        cap=cv2.VideoCapture(0)
-        if not cap.isOpened():
-            st.error("❌ Cannot open webcam.")
-        else:
-            stop_b=st.button("⏹  Stop",key="stop")
-            frame_count=0; t_start=time.time()
-            while not stop_b:
-                ret,frame=cap.read()
-                if not ret: break
-                frame=cv2.flip(frame,1)
-                rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-                try: ann,dets=process(rgb,api_type,hands_det,mp_mod,g_model,labels)
-                except: ann,dets=rgb,[]
 
-                # FPS overlay
-                frame_count+=1
-                fps=int(frame_count/(time.time()-t_start+0.001))
-                cv2.rectangle(ann,(10,ann.shape[0]-35),(80,ann.shape[0]-10),(0,0,0),cv2.FILLED)
-                cv2.putText(ann,f"FPS: {min(fps,30)}",(14,ann.shape[0]-16),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.55,(255,255,255),1)
+# ── Tabs ─────────────────────────────────────────────────────────────────────
+tab_live, tab_upload, tab_model, tab_about = st.tabs(
+    ["📷  Live", "🖼️  Upload", "📊  Model", "ℹ️  About"])
 
-                # Live badge
-                cv2.circle(ann,(ann.shape[1]-20,20),7,(34,197,94),-1)
+with tab_live:
+    cam_col, side_col = st.columns([3, 2], gap="medium")
+    with cam_col:
+        ctx = webrtc_streamer(
+            key="signlang-live",
+            mode=WebRtcMode.SENDRECV,
+            video_frame_callback=engine,
+            media_stream_constraints={"video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
+                                      "audio": False},
+            async_processing=True,
+        )
+        st.caption("Click **START** and allow camera access. Hold a sign for the hold time to add it; "
+                   "show **Fist** to insert a space. To repeat a sign, lower your hand briefly.")
 
-                f_ph.image(ann,channels="RGB",use_container_width=True)
+    with side_col:
+        gesture_ph = st.empty()
+        st.markdown('<div class="k" style="margin-top:0.2rem"><span>💬 Sentence</span></div>',
+                    unsafe_allow_html=True)
+        sentence_ph = st.empty()
+        b1, b2, b3 = st.columns(3)
+        b4, b5, b6 = st.columns(3)
+        if b1.button("➕ Add sign", width="stretch", help="Add the current sign right now"):
+            engine.add_current()
+        if b2.button("␣ Space", width="stretch"):
+            engine.edit("space")
+        if b3.button("⌫ Delete", width="stretch", help="Delete the last character"):
+            engine.edit("backspace")
+        if b4.button("↶ Undo", width="stretch", help="Remove the last added sign"):
+            engine.edit("undo")
+        if b5.button("🗑 Clear", width="stretch"):
+            engine.edit("clear")
+        speak_clicked = b6.button("🔊 Speak", width="stretch", type="primary")
+        audio_ph = st.empty()
 
-                if dets:
-                    best=max(dets,key=lambda x:x["confidence"])
-                    st.session_state.cur=best["label"]
-                    st.session_state.conf=best["confidence"]
-                    if best["confidence"]>=conf_threshold:
-                        pct=int(best["confidence"]*100)
-                        g_ph.markdown(f"""
-                        <div style="padding:0.5rem 0 0.3rem">
-                          <div class="gesture-label">GESTURE · {best['handedness'].upper()} HAND</div>
-                          <div class="gesture-text">{best['label']}</div>
-                          <div class="gesture-hand">Detected with {pct}% confidence</div>
-                        </div>""",unsafe_allow_html=True)
-                        cf_ph.markdown(f"""
-                        <div>
-                          <div class="conf-label"><span>CONFIDENCE</span><span class="conf-pct">{pct}%</span></div>
-                          <div class="conf-track"><div class="conf-fill" style="width:{pct}%"></div></div>
-                        </div>""",unsafe_allow_html=True)
-                        mt_ph.markdown(
-                            f'<div class="nn-badge">{"🧠 Neural Network" if best["method"]=="nn" else "📐 Rules"}</div>',
-                            unsafe_allow_html=True)
-                else:
-                    st.session_state.cur=""
-                    g_ph.markdown("""
-                    <div style="padding:0.5rem 0 1rem">
-                      <div class="gesture-label">GESTURE</div>
-                      <div class="gesture-text gesture-empty">—</div>
-                      <div class="gesture-hand">Show your hand to the camera</div>
-                    </div>""",unsafe_allow_html=True)
-                    cf_ph.markdown("""
-                    <div>
-                      <div class="conf-label"><span>CONFIDENCE</span><span class="conf-pct">—</span></div>
-                      <div class="conf-track"><div class="conf-fill" style="width:0%"></div></div>
-                    </div>""",unsafe_allow_html=True)
-                time.sleep(0.03)
-            cap.release()
+        snap = engine.get()
+        gesture_ph.markdown(gesture_html(snap if ctx.state.playing else None), unsafe_allow_html=True)
+        sentence_ph.markdown(sentence_html(snap["text"]), unsafe_allow_html=True)
+        if speak_clicked:
+            play(snap["text"], audio_ph)
+        if snap["text"]:
+            st.download_button("⬇ Save text", snap["text"], file_name="signlang.txt", width="stretch")
 
-# ══ UPLOAD ════════════════════════════════════════════════════════════════════
-with tab2:
-    up=st.file_uploader("Upload a hand gesture image (JPG / PNG)",
-                        type=["jpg","jpeg","png"],label_visibility="visible")
+    # Live refresh: keep updating the side panel while the stream runs.
+    # Any button click interrupts this loop with a rerun, which is what we want.
+    last_chunks = snap["n_chunks"]
+    while ctx.state.playing:
+        snap = engine.get()
+        gesture_ph.markdown(gesture_html(snap), unsafe_allow_html=True)
+        sentence_ph.markdown(sentence_html(snap["text"]), unsafe_allow_html=True)
+        if auto_speak and snap["n_chunks"] > last_chunks:
+            new = snap["last_chunk"].strip()
+            if len(new) > 1:  # speak words/phrases, not single letters
+                play(new, audio_ph)
+        last_chunks = snap["n_chunks"]
+        time.sleep(0.12)
+
+with tab_upload:
+    up = st.file_uploader("Upload a photo of a hand sign (JPG / PNG)", type=["jpg", "jpeg", "png"])
     if up:
-        img=Image.open(up).convert("RGB"); arr=np.array(img)
-        with st.spinner("Running inference..."):
-            ann,dets=process(arr,api_type,hands_det,mp_mod,g_model,labels)
-        l,r=st.columns([3,2],gap="medium")
-        with l:
-            t1,t2=st.tabs(["Original","With Landmarks"])
-            with t1: st.image(img,use_container_width=True)
-            with t2: st.image(ann,use_container_width=True)
-        with r:
-            if dets:
-                for d in dets:
-                    pct=int(d["confidence"]*100)
-                    st.markdown(f"""
-                    <div style="padding:0.8rem 0;border-bottom:1px solid #f0f2f8;margin-bottom:0.8rem">
-                      <div class="gesture-label">{d['handedness'].upper()} HAND</div>
-                      <div class="gesture-text">{d['label']}</div>
-                      <div class="conf-label" style="margin-top:0.5rem">
-                        <span>CONFIDENCE</span><span class="conf-pct">{pct}%</span>
-                      </div>
-                      <div class="conf-track"><div class="conf-fill" style="width:{pct}%"></div></div>
-                      <div class="nn-badge">{"🧠 Neural Network" if d['method']=='nn' else '📐 Rules'}</div>
-                    </div>""",unsafe_allow_html=True)
-            else:
-                st.info("No hand detected — try a clearer photo with good lighting.")
+        img = np.array(Image.open(up).convert("RGB"))
+        with st.spinner("Detecting hands…"):
+            hands = load_image_detector().detect(img)
+        annotated = img.copy()
+        results = []
+        for h in hands:
+            probs = classifier.predict_proba(h.features)[0]
+            top = np.argsort(probs)[::-1][:3]
+            results.append((h, [(classifier.labels[i], float(probs[i])) for i in top]))
+            draw_hand(annotated, h, classifier.labels[top[0]])
+        lcol, rcol = st.columns([3, 2], gap="medium")
+        with lcol:
+            t1, t2 = st.tabs(["With landmarks", "Original"])
+            t1.image(annotated, width="stretch")
+            t2.image(img, width="stretch")
+        with rcol:
+            if not results:
+                st.info("No hand detected — try a clearer photo with good lighting and the whole hand visible.")
+            for h, top3 in results:
+                lbl, c = top3[0]
+                rows = "".join(
+                    f'<div class="k" style="margin-top:0.4rem"><span>{html.escape(l)}</span>'
+                    f'<span class="pct">{p:.0%}</span></div>'
+                    f'<div class="track"><div class="fill" style="width:{p*100:.0f}%"></div></div>'
+                    for l, p in top3)
+                st.markdown(f'<div class="panel"><div class="k"><span>{h.handedness.upper()} hand</span></div>'
+                            f'<div class="gesture-text">{html.escape(lbl)}</div>'
+                            f'<div class="sub">Top 3 predictions</div>{rows}</div>', unsafe_allow_html=True)
 
-# ══ ABOUT ════════════════════════════════════════════════════════════════════
-with tab3:
-    c1,c2=st.columns(2,gap="large")
+with tab_model:
+    if not metrics:
+        st.info("No metrics yet — run `python train.py` to generate them.")
+    else:
+        import pandas as pd
+
+        st.markdown("Numbers below are on a **held-out test set** the model never saw during training "
+                    "or model selection. *Left-hand accuracy* re-runs the same test set with every hand "
+                    "mirrored.")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Test accuracy", f"{metrics['test_accuracy']*100:.1f}%")
+        m2.metric("Macro-F1", f"{metrics['test_macro_f1']*100:.1f}%",
+                  help="Average F1 across classes, so every class counts equally regardless of size.")
+        m3.metric("Left-hand accuracy", f"{metrics['test_accuracy_mirrored']*100:.1f}%")
+        m4.metric("Train / val / test", "{train} / {val} / {test}".format(**metrics["split"]))
+
+        counts = metrics["class_counts"]
+        df = pd.DataFrame([
+            {"Gesture": l, "Samples": counts[l],
+             "Precision": metrics["per_class"][l]["precision"],
+             "Recall": metrics["per_class"][l]["recall"],
+             "F1": metrics["per_class"][l]["f1-score"],
+             "Test samples": int(metrics["per_class"][l]["support"])}
+            for l in metrics["labels"]]).sort_values("Samples")
+        low = df[df["Samples"] < 50]["Gesture"].tolist()
+        if low:
+            st.warning(f"Low on data: **{', '.join(low)}**. Collect more with "
+                       f"`python collect_data.py --fill 100` and retrain — results for these "
+                       f"classes are based on very few test samples.")
+        c1, c2 = st.columns([1, 1], gap="large")
+        with c1:
+            st.markdown("##### Samples per gesture")
+            st.bar_chart(df.set_index("Gesture")["Samples"], color="#5b5bd6", horizontal=True, height=380)
+        with c2:
+            st.markdown("##### Per-class test results")
+            st.dataframe(df.sort_values("F1"), hide_index=True, width="stretch", height=380,
+                         column_config={k: st.column_config.ProgressColumn(k, format="%.2f", min_value=0, max_value=1)
+                                        for k in ("Precision", "Recall", "F1")})
+        c3, c4 = st.columns([1, 1], gap="large")
+        if (STATIC_DIR / "confusion_matrix.png").exists():
+            c3.image(str(STATIC_DIR / "confusion_matrix.png"), width="stretch")
+        if (STATIC_DIR / "training_curves.png").exists():
+            c4.image(str(STATIC_DIR / "training_curves.png"), width="stretch")
+        st.caption(f"Trained with class-weighted loss: {metrics['class_weights']} · augmentation: "
+                   f"{metrics['augment']} (strength {metrics.get('aug_strength', 1.0)}) · best epoch "
+                   f"{metrics['best_epoch']}/{metrics['epochs']}")
+
+with tab_about:
+    c1, c2 = st.columns(2, gap="large")
     with c1:
         st.markdown("#### 🏗️ Pipeline")
-        st.code("""Webcam → MediaPipe BlazePalm
-→ 21 hand landmarks (x, y, z)
-→ Normalize to wrist origin
+        st.code("""Browser camera ── WebRTC ──► server
+→ MediaPipe Hands: 21 landmarks (x, y, z)
+→ normalize: wrist origin, scale to [-1, 1]
 → GestureNet MLP (PyTorch)
-   Linear(63→256)+BN+ReLU+Drop
-   Linear(256→128)+BN+ReLU+Drop
-   Linear(128→64)+ReLU
-   Linear(64→14)+Softmax
-→ Label + Confidence""",language="text")
+     63 → 256 → 128 → 64 → classes
+→ confidence threshold
+→ majority vote over last N frames
+→ hold-to-commit sentence builder
+→ text-to-speech (gTTS / pyttsx3)""", language="text")
     with c2:
-        st.markdown("#### 📝 Resume Line")
-        st.code("""SignLang AI | PyTorch · MediaPipe · OpenCV
-• 1,007 samples collected, GestureNet trained:
-  98% val accuracy, 14 ASL gesture classes
-• Real-time: landmark extraction → NN inference
-  at 30fps, fully offline, <15ms latency
-• Full ML lifecycle: collect → train → deploy""",language="text")
-
-st.markdown("</div>",unsafe_allow_html=True)
+        st.markdown("#### 🧠 Training")
+        st.markdown("""
+- Stratified **70 / 15 / 15** train / val / test split
+- **Class-weighted** cross-entropy for imbalanced classes
+- **Augmentation**: left/right mirroring, rotation, stretch, landmark jitter
+- Checkpoint chosen by validation **macro-F1**
+- Per-class report + confusion matrix on the held-out test set
+""")
